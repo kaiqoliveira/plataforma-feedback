@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "prefixo": { "value": "feedback" },
+    "ambiente": { "value": "dev" },
+    "emailsAdministradores": { "value": [ "seu-email@exemplo.com" ] },
+    "principalIdOperador": { "value": "" }
+  }
+}

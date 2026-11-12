@@ -1,0 +1,69 @@
+name: Deploy Azure
+
+# Deploy automatizado: a cada push na main (ou manualmente), provisiona/atualiza a
+# infraestrutura (Bicep, idempotente) e publica as funções.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # OIDC com o Entra ID: nenhum segredo de longa duração no GitHub
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  PACOTE: target/azure-functions/feedback-functions
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build e testes
+        run: mvn -B clean verify
+
+      - name: Login no Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Provisionar infraestrutura (Bicep)
+        id: infra
+        run: |
+          SAIDA=$(az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "feedback-${{ github.run_number }}" \
+            --template-file infra/main.bicep \
+            --parameters infra/main.parameters.json \
+            --parameters emailsAdministradores='${{ vars.EMAILS_ADMINISTRADORES }}' \
+            --query properties.outputs -o json)
+          echo "functionApp=$(echo "$SAIDA" | jq -r .functionAppName.value)" >> "$GITHUB_OUTPUT"
+          echo "urlApi=$(echo "$SAIDA" | jq -r .urlApi.value)" >> "$GITHUB_OUTPUT"
+
+      - name: Publicar funções
+        uses: azure/functions-action@v1
+        with:
+          app-name: ${{ steps.infra.outputs.functionApp }}
+          package: ${{ env.PACOTE }}
+          sku: flexconsumption
+
+      - name: Resumo
+        run: |
+          echo "### Deploy concluído" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Function App: \`${{ steps.infra.outputs.functionApp }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- API: ${{ steps.infra.outputs.urlApi }}" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,44 @@
+### Variáveis (VS Code REST Client / IntelliJ HTTP Client)
+@url = https://<function-app>.azurewebsites.net
+@chave = <chave da função ReceberAvaliacao>
+
+### 1) Avaliação positiva -> 201, urgência BAIXA (sem e-mail)
+POST {{url}}/avaliacao
+Content-Type: application/json
+x-functions-key: {{chave}}
+
+{ "descricao": "Aula muito clara, exemplos excelentes", "nota": 9 }
+
+### 2) Avaliação média -> 201, urgência MEDIA
+POST {{url}}/avaliacao
+Content-Type: application/json
+x-functions-key: {{chave}}
+
+{ "descricao": "Conteúdo bom, mas o ritmo foi rápido", "nota": 5 }
+
+### 3) Avaliação crítica -> 201, urgência CRITICA e e-mail aos administradores
+POST {{url}}/avaliacao
+Content-Type: application/json
+x-functions-key: {{chave}}
+
+{ "descricao": "O vídeo da aula não carrega e não tive resposta no fórum", "nota": 1 }
+
+### 4) Validação -> 400
+POST {{url}}/avaliacao
+Content-Type: application/json
+x-functions-key: {{chave}}
+
+{ "descricao": "", "nota": 11 }
+
+### 5) Sem chave -> 401
+POST {{url}}/avaliacao
+Content-Type: application/json
+
+{ "descricao": "teste", "nota": 5 }
+
+### 6) Disparar o relatório semanal manualmente (master key do host)
+POST {{url}}/admin/functions/GerarRelatorioSemanal
+Content-Type: application/json
+x-functions-key: <master key>
+
+{ "input": "" }
