@@ -3,6 +3,8 @@ package br.com.fiap.feedback.config;
 import br.com.fiap.feedback.notificacao.EmailAcsNotificador;
 import br.com.fiap.feedback.notificacao.LogNotificador;
 import br.com.fiap.feedback.notificacao.Notificador;
+import br.com.fiap.feedback.notificacao.SmtpNotificador;
+import io.quarkus.mailer.Mailer;
 import com.azure.communication.email.EmailClientBuilder;
 import com.azure.core.credential.TokenCredential;
 import com.azure.cosmos.ConsistencyLevel;
@@ -88,21 +90,36 @@ public class AzureProducers {
         return builder.buildClient().getBlobContainerClient(container);
     }
 
+    /**
+     * Escolhe o provedor de e-mail pela propriedade {@code email.provedor} (App Setting {@code EMAIL_PROVEDOR}):
+     * {@code smtp} (Gmail via quarkus-mailer), {@code acs} (Azure Communication Services) ou {@code log}.
+     */
     @Produces
     @Singleton
     Notificador notificador(
+            Mailer mailer,
+            @ConfigProperty(name = "email.provedor", defaultValue = "log") String provedor,
             @ConfigProperty(name = "email.connection-string") Optional<String> connectionString,
             @ConfigProperty(name = "email.remetente") Optional<String> remetente,
             @ConfigProperty(name = "email.destinatarios") Optional<List<String>> destinatarios) {
 
-        Optional<String> cs = connectionString.filter(s -> !s.isBlank());
-        if (cs.isEmpty()) {
-            LOG.warn("email.connection-string não configurada: e-mails serão apenas registrados no log");
-            return new LogNotificador();
+        List<String> para = destinatarios.orElse(List.of());
+        switch (provedor.trim().toLowerCase()) {
+            case "smtp":
+                LOG.info("Provedor de e-mail: SMTP (quarkus-mailer)");
+                return new SmtpNotificador(mailer, para);
+            case "acs":
+                LOG.info("Provedor de e-mail: Azure Communication Services");
+                return new EmailAcsNotificador(
+                        new EmailClientBuilder().connectionString(connectionString
+                                .filter(s -> !s.isBlank())
+                                .orElseThrow(() -> new IllegalStateException("Configure EMAIL_CONNECTION_STRING")))
+                                .buildClient(),
+                        remetente.orElseThrow(() -> new IllegalStateException("Configure EMAIL_REMETENTE")),
+                        para);
+            default:
+                LOG.warn("email.provedor=" + provedor + ": e-mails serão apenas registrados no log");
+                return new LogNotificador();
         }
-        return new EmailAcsNotificador(
-                new EmailClientBuilder().connectionString(cs.get()).buildClient(),
-                remetente.orElseThrow(() -> new IllegalStateException("Configure EMAIL_REMETENTE")),
-                destinatarios.orElse(List.of()));
     }
 }

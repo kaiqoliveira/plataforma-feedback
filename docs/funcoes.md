@@ -56,7 +56,7 @@ As três funções ficam na mesma Function App (mesmo deploy), mas cada uma tem 
 | **Classe** | `funcoes/NotificarUrgenciaFunction.java` |
 | **Gatilho** | Azure Storage Queue `avaliacoes-criticas` |
 | **Entrada** | Mensagem JSON `MensagemAvaliacaoCritica` (id, descricao, nota, urgencia, dataEnvio) |
-| **Saída** | E-mail aos administradores (Azure Communication Services) |
+| **Saída** | E-mail aos administradores (SMTP via `quarkus-mailer`) |
 | **Responsabilidade** | Avisar os administradores sobre cada avaliação crítica |
 
 **Conteúdo do e-mail** (dados exigidos pelo enunciado):
@@ -70,7 +70,7 @@ Data de envio: 12/11/2026 14:42 (horário de Brasília)
 ```
 
 **Resiliência**
-- Se o ACS falhar, a função lança exceção e o host **reprocessa** a mensagem (`maxDequeueCount: 5` no `host.json`);
+- Se o envio do e-mail falhar, a função lança exceção e o host **reprocessa** a mensagem (`maxDequeueCount: 5` no `host.json`);
 - Depois de 5 falhas, a mensagem vai para `avaliacoes-criticas-poison`, e o alerta **"Avaliação crítica sem notificação"** (severidade 0) dispara;
 - A avaliação continua salva no banco mesmo se o e-mail falhar.
 
@@ -139,7 +139,10 @@ Fora do agendamento, o período cobre os 7 dias terminando **hoje**, então as a
 | `COSMOS_KEY` | `cosmos.key` | **Só local** (emulador) |
 | `BLOB_ENDPOINT` / `BLOB_CONTAINER` | `blob.endpoint` / `blob.container` | Conta e container dos relatórios |
 | `BLOB_CONNECTION_STRING` | `blob.connection-string` | **Só local** (Azurite) |
-| `EMAIL_CONNECTION_STRING` | `email.connection-string` | Key Vault reference para o ACS |
+| `EMAIL_PROVEDOR` | `email.provedor` | `smtp` (padrão no deploy com Gmail), `acs` ou `log` |
+| `QUARKUS_MAILER_USERNAME` / `QUARKUS_MAILER_FROM` | `quarkus.mailer.*` | Conta Gmail remetente |
+| `QUARKUS_MAILER_PASSWORD` | `quarkus.mailer.password` | Key Vault reference (senha de app) |
+| `EMAIL_CONNECTION_STRING` | `email.connection-string` | Key Vault reference para o ACS (alternativa) |
 | `EMAIL_REMETENTE` | `email.remetente` | `DoNotReply@<dominio>.azurecomm.net` |
 | `EMAIL_DESTINATARIOS` | `email.destinatarios` | Lista separada por vírgula |
 | `RELATORIO_CRON` | (binding) | Agendamento do relatório |

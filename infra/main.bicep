@@ -27,6 +27,13 @@ param cronRelatorio string = '0 59 2 * * 1'
 @description('Localização dos dados do Azure Communication Services (e-mail).')
 param localDadosEmail string = 'Brazil'
 
+@description('Conta Gmail usada para enviar os e-mails via SMTP (ex.: voce@gmail.com). Vazio = usa o Azure Communication Services.')
+param usuarioSmtp string = ''
+
+@description('Senha de app do Google (16 caracteres) da conta acima. Vai para o Key Vault.')
+@secure()
+param senhaSmtp string = ''
+
 @description('Opcional: Object ID (Entra ID) de quem vai operar a demo, para acessar o Data Explorer do Cosmos e os relatórios no Blob.')
 param principalIdOperador string = ''
 
@@ -42,6 +49,7 @@ var sufixo = uniqueString(resourceGroup().id)
 var nomeBase = '${prefixo}-${ambiente}'
 var nomeFunctionApp = 'func-${nomeBase}-${sufixo}'
 var nomeStorage = take('st${prefixo}${ambiente}${sufixo}', 24)
+var usaSmtp = !empty(usuarioSmtp) && !empty(senhaSmtp)
 var containerDeploy = 'deploymentpackage'
 var containerRelatorios = 'relatorios'
 var filaCriticas = 'avaliacoes-criticas'
@@ -282,6 +290,15 @@ resource segredoAcs 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   }
 }
 
+resource segredoSmtp 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (usaSmtp) {
+  parent: keyVault
+  name: 'smtp-senha'
+  properties: {
+    value: senhaSmtp
+    contentType: 'password'
+  }
+}
+
 // -----------------------------------------------------------------------------
 // RBAC: menor privilégio para a identidade da Function App
 // -----------------------------------------------------------------------------
@@ -380,7 +397,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       http20Enabled: true
-      appSettings: [
+      appSettings: concat([
         // Host das Functions usando a identidade (sem connection string)
         { name: 'AzureWebJobsStorage__accountName', value: storage.name }
         { name: 'AzureWebJobsStorage__credential', value: 'managedidentity' }
@@ -398,8 +415,14 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         { name: 'EMAIL_CONNECTION_STRING', value: '@Microsoft.KeyVault(VaultName=${keyVault.name};SecretName=${segredoAcs.name})' }
         { name: 'EMAIL_REMETENTE', value: 'DoNotReply@${emailDominio.properties.mailFromSenderDomain}' }
         { name: 'EMAIL_DESTINATARIOS', value: join(emailsAdministradores, ',') }
+        { name: 'EMAIL_PROVEDOR', value: usaSmtp ? 'smtp' : 'acs' }
         { name: 'RELATORIO_CRON', value: cronRelatorio }
-      ]
+      ], usaSmtp ? [
+        // SMTP do Gmail (extensão quarkus-mailer). Senha lida do Key Vault.
+        { name: 'QUARKUS_MAILER_USERNAME', value: usuarioSmtp }
+        { name: 'QUARKUS_MAILER_FROM', value: 'Plataforma de Feedback <${usuarioSmtp}>' }
+        { name: 'QUARKUS_MAILER_PASSWORD', value: '@Microsoft.KeyVault(VaultName=${keyVault.name};SecretName=smtp-senha)' }
+      ] : [])
     }
   }
   dependsOn: [
@@ -407,6 +430,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
     rbacFila
     rbacTabela
     rbacKeyVault
+    segredoSmtp
     cosmosRoleFuncao
     containerDeployRes
     containerRelatoriosRes

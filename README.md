@@ -6,7 +6,7 @@ Plataforma **serverless** na **Microsoft Azure** para estudantes avaliarem aulas
 - **Notifica por e-mail**, na hora, os administradores sobre avaliações **críticas**;
 - **Gera um relatório semanal** com a média das avaliações, a quantidade por dia e a quantidade por urgência.
 
-**Stack:** Java 21 · Quarkus 3 (extensões `quarkus-azure-functions`, `quarkus-hibernate-validator`, `quarkus-jackson`) · Azure Functions (Flex Consumption) · Cosmos DB serverless · Storage Queue/Blob · Azure Communication Services (e-mail) · Key Vault · Application Insights · Bicep · GitHub Actions.
+**Stack:** Java 21 · Quarkus 3 (extensões `quarkus-azure-functions`, `quarkus-hibernate-validator`, `quarkus-jackson`) · Azure Functions (Flex Consumption) · Cosmos DB serverless · Storage Queue/Blob · E-mail via SMTP (extensão `quarkus-mailer`) · Key Vault · Application Insights · Bicep · GitHub Actions.
 
 ---
 
@@ -56,7 +56,7 @@ flowchart LR
     F1 -- "se CRITICA" --> Q[["Storage Queue<br/>avaliacoes-criticas"]]
     Q --> F2
     Q -. "5 falhas" .-> P[["avaliacoes-criticas-poison"]]
-    F2 --> ACS["Azure Communication<br/>Services Email"]
+    F2 --> ACS["E-mail SMTP<br/>(quarkus-mailer)"]
 
     T((("Domingo 23:59<br/>(Brasília)"))) --> F3
     F3 -- consulta semana --> DB
@@ -64,7 +64,7 @@ flowchart LR
     F3 --> ACS
     ACS -- e-mail --> A([Administradores])
 
-    KV["Key Vault"] -. "connection string ACS" .-> FA
+    KV["Key Vault"] -. "senha SMTP" .-> FA
     MI["Managed Identity"] -. "RBAC" .-> DB & Q & B & KV
     FA -. telemetria .-> AI["Application Insights<br/>+ Log Analytics"]
     AI -- alertas --> AG["Action Group"] --> A
@@ -92,8 +92,8 @@ flowchart LR
 | Banco | Cosmos DB for NoSQL (serverless), container `avaliacoes`, partição `/diaEnvio` | Armazena as avaliações |
 | Mensageria | Storage Queue `avaliacoes-criticas` (+ `-poison`) | Desacopla o registro da notificação |
 | Arquivos | Blob container `relatorios` | Histórico dos relatórios em JSON |
-| E-mail | Azure Communication Services + domínio gerenciado pela Azure | Envio dos e-mails |
-| Segredos | Key Vault (RBAC) | Connection string do ACS |
+| E-mail | SMTP (Gmail) via extensão `quarkus-mailer`; Azure Communication Services como alternativa (`EMAIL_PROVEDOR=acs`) | Envio dos e-mails |
+| Segredos | Key Vault (RBAC) | Senha SMTP e connection string do ACS |
 | Identidade | User-Assigned Managed Identity | Acesso aos recursos sem senha |
 | Observabilidade | Application Insights + Log Analytics + alertas + Action Group | Logs, métricas, traces e alertas |
 
@@ -120,7 +120,7 @@ Documentação completa em **[docs/funcoes.md](docs/funcoes.md)**.
 - **Chaves desabilitadas:** Cosmos DB com `disableLocalAuth: true` e Storage com `allowSharedKeyAccess: false`. O único acesso possível é por identidade do Entra ID com papel RBAC.
 - **Criptografia** em repouso (padrão Azure, chaves gerenciadas pela Microsoft) e em trânsito (HTTPS obrigatório, **TLS 1.2** mínimo em todos os serviços, FTP desabilitado).
 - **Sem acesso público** aos blobs. Relatórios em container privado, com *soft delete* de 7 dias.
-- O único segredo (connection string do ACS) fica no **Key Vault** e chega à função por *Key Vault reference* (`@Microsoft.KeyVault(...)`).
+- Os segredos (senha SMTP e connection string do ACS) ficam no **Key Vault** e chegam à função por *Key Vault reference* (`@Microsoft.KeyVault(...)`). No GitHub, a senha é um *secret* (`SMTP_SENHA`), nunca um arquivo.
 - **API protegida** por chave de função (`x-functions-key`). Requisições sem chave recebem 401.
 - **Validação de entrada** com Bean Validation (`@NotBlank`, `@Size(max=2000)`, `@Min(0)`, `@Max(10)`), mais as regras do domínio. Nota decimal (`7.5`) é rejeitada, e não truncada. Erros internos não expõem detalhes ao cliente.
 
@@ -205,6 +205,10 @@ O script cria o resource group, a App Registration com credencial federada (OIDC
 | Secret | `AZURE_SUBSCRIPTION_ID` | assinatura exibida |
 | Variable | `AZURE_RESOURCE_GROUP` | `rg-feedback-dev` |
 | Variable | `EMAILS_ADMINISTRADORES` | `["voce@exemplo.com"]` (array JSON) |
+| Variable | `SMTP_USUARIO` | conta Gmail que envia os e-mails (ex.: `voce@gmail.com`) |
+| Secret | `SMTP_SENHA` | **senha de app** do Google dessa conta (16 caracteres) |
+
+> **Senha de app do Google:** ative a verificação em duas etapas na conta e gere a senha em https://myaccount.google.com/apppasswords. Sem `SMTP_USUARIO`/`SMTP_SENHA`, o deploy usa o Azure Communication Services.
 
 Crie também o environment **`dev`** em *Settings → Environments*.
 
@@ -275,7 +279,7 @@ Resposta de sucesso (`201 Created`):
 
 O arquivo [`requests.http`](requests.http) tem todos os cenários prontos para o VS Code (REST Client) ou o IntelliJ.
 
-> O e-mail sai de `DoNotReply@<id>.azurecomm.net` (domínio gerenciado pela Azure). Na primeira vez, confira a caixa de spam.
+> Os e-mails saem da conta Gmail configurada em `SMTP_USUARIO`. Na primeira vez, confira a caixa de spam.
 
 ---
 
@@ -319,7 +323,7 @@ Todos os serviços são cobrados por uso. Com o volume de um desafio acadêmico,
 | Azure Functions Flex Consumption | Execuções e GB-s, com cota gratuita mensal |
 | Cosmos DB serverless | RU consumida + armazenamento |
 | Storage (fila e blob) | Operações + GB armazenado (centavos) |
-| Communication Services Email | Por e-mail enviado |
+| SMTP Gmail | Gratuito (limite diário da conta Google) |
 | Application Insights / Log Analytics | GB ingerido (limitado a 1 GB/dia) |
 
 Depois de gravar o vídeo, apague o resource group (seção 6).
