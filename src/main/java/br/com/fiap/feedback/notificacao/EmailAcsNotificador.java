@@ -6,7 +6,9 @@ import com.azure.communication.email.models.EmailMessage;
 import com.azure.communication.email.models.EmailSendResult;
 import com.azure.communication.email.models.EmailSendStatus;
 import com.azure.core.util.polling.PollResponse;
+import com.azure.core.util.polling.SyncPoller;
 
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -17,6 +19,8 @@ import java.util.List;
  * <i>Key Vault reference</i> nas App Settings — ela nunca aparece no código nem no repositório.</p>
  */
 public class EmailAcsNotificador implements Notificador {
+
+    static final Duration TEMPO_MAXIMO_ENVIO = Duration.ofSeconds(60);
 
     private final EmailClient cliente;
     private final String remetente;
@@ -39,12 +43,22 @@ public class EmailAcsNotificador implements Notificador {
                 .setSubject(assunto)
                 .setBodyPlainText(mensagem);
 
-        PollResponse<EmailSendResult> resposta = cliente.beginSend(email).waitForCompletion();
+        SyncPoller<EmailSendResult, EmailSendResult> envio = cliente.beginSend(email);
+        PollResponse<EmailSendResult> resposta;
+        try {
+            // Nunca espera indefinidamente: sem limite, a função ficaria presa até o timeout do host (5 min)
+            resposta = envio.waitForCompletion(TEMPO_MAXIMO_ENVIO);
+        } catch (RuntimeException e) {
+            PollResponse<EmailSendResult> ultimo = envio.poll();
+            throw new IllegalStateException("E-mail não confirmado pelo ACS em " + TEMPO_MAXIMO_ENVIO.toSeconds()
+                    + "s. Último status: " + (ultimo == null ? "desconhecido" : ultimo.getStatus()), e);
+        }
         EmailSendResult resultado = resposta.getValue();
         if (resultado == null || resultado.getStatus() != EmailSendStatus.SUCCEEDED) {
             // Lança para que a execução falhe: a fila reprocessa a mensagem e o alerta é disparado
             throw new IllegalStateException("Envio de e-mail não concluído: "
-                    + (resultado == null ? "sem resposta" : resultado.getStatus()));
+                    + (resultado == null ? "sem resposta" : resultado.getStatus()
+                    + (resultado.getError() == null ? "" : " - " + resultado.getError().getMessage())));
         }
     }
 }
