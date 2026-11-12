@@ -5,6 +5,6 @@
     "prefixo": { "value": "feedback" },
     "ambiente": { "value": "dev" },
     "emailsAdministradores": { "value": [ "seu-email@exemplo.com" ] },
-    "principalIdOperador": { "value": "" }
+       "principalIdOperador": { "value": "790e0920-ddb2-4f60-bfa9-c1ee2013a681" }
   }
 }
